@@ -13,6 +13,15 @@ st.set_page_config(page_title="My Routine OS", page_icon="☁️", layout="wide"
 # --- CONFIGURATION ---
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1fYu8ws8PZF-36oseUNXvcoT_zO0xVfYbL6vScYWbhdk/edit"
 
+# --- TIMEZONE HANDLER (BANGLADESH) ---
+def get_bd_time():
+    """Returns the current time in Bangladesh (UTC+6)"""
+    return datetime.utcnow() + timedelta(hours=6)
+
+def get_bd_date():
+    """Returns the current date in Bangladesh"""
+    return get_bd_time().date()
+
 # --- GOOGLE SHEETS CONNECTION HANDLER ---
 def get_google_sheet_client():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -95,29 +104,28 @@ def update_status_in_sheet(task_name, date_str, new_status):
     try:
         cell_list = ws.findall(task_name)
         for cell in cell_list:
+            # Column 4 is Date
             date_cell = ws.cell(cell.row, 4) 
             if date_cell.value == str(date_str):
+                # Column 8 is Status
                 ws.update_cell(cell.row, 8, new_status)
     except:
         st.warning("Could not update status. Task might be duplicated or not found.")
 
-# --- NEW FUNCTION: DELETE TASK ---
 def delete_task_from_sheet(task_name, date_obj, time_str):
     """Finds a task by Name + Date + Time and deletes the row."""
     sheet = init_sheets()
     ws = sheet.worksheet("Tasks")
     
-    # 1. Find all cells with the matching Task Name
     cell_list = ws.findall(task_name)
     
     for cell in cell_list:
         row_num = cell.row
-        # 2. Verify Date (Col 4) and StartTime (Col 5) to ensure we delete the right one
-        # Note: GSpread fetches row values as a list. Python index 0 = Col A.
-        # Date is Col D (index 3), StartTime is Col E (index 4)
         row_values = ws.row_values(row_num)
         
         try:
+            # Columns in sheet are 1-indexed. Date is col 4, StartTime is col 5.
+            # Python list is 0-indexed. Date is index 3, StartTime is index 4.
             sheet_date = row_values[3] 
             sheet_time = row_values[4]
             
@@ -130,7 +138,7 @@ def delete_task_from_sheet(task_name, date_obj, time_str):
     return False
 
 def add_recurring_schedule(task, cat, loc, start_t, dur, priority, notes, days_selected, weeks_to_plan=4):
-    today = datetime.today().date()
+    today = get_bd_date()
     new_entries = []
     
     for i in range(weeks_to_plan * 7):
@@ -168,8 +176,8 @@ df_travel = st.session_state.df_travel
 # --- SIDEBAR: NEW INPUT FORM ---
 with st.sidebar:
     st.header("📝 Create Routine")
+    st.caption(f"📅 BD Date: {get_bd_date()}")
     
-    # Toggle for recurring vs one-time
     is_recurring = st.toggle("🔄 Repeating Task?", value=False)
     
     with st.form("routine_form", clear_on_submit=True):
@@ -183,9 +191,8 @@ with st.sidebar:
         start_time = col_t1.time_input("Start Time", time(10, 0))
         duration_mins = col_t2.number_input("Duration (Mins)", min_value=15, value=60, step=15)
         
-        # LOGIC SWITCH: Date Picker OR Checkboxes
         days = []
-        specific_date = datetime.today()
+        specific_date = get_bd_date()
         
         if is_recurring:
             st.write("Repeating Days:")
@@ -199,7 +206,7 @@ with st.sidebar:
             if c6.checkbox("Sat"): days.append("Saturday")
             if c7.checkbox("Sun"): days.append("Sunday")
         else:
-            specific_date = st.date_input("Date", datetime.today())
+            specific_date = st.date_input("Date", get_bd_date())
         
         st.subheader("Details")
         priority = st.select_slider("Priority", options=["Low", "Medium", "High"], value="Medium")
@@ -210,16 +217,14 @@ with st.sidebar:
         if submitted and task_name:
             with st.spinner("Syncing with Google Cloud..."):
                 if is_recurring and days:
-                    # Case A: Recurring
                     count = add_recurring_schedule(task_name, category, location, start_time, duration_mins, priority, notes, days)
                     st.success(f"Added {count} recurring tasks!")
                 else:
-                    # Case B: One-time (Use specific date)
                     new_entry = {
                         "Task": task_name,
                         "Category": category,
                         "Location": location,
-                        "Date": specific_date, # Uses the date picker value
+                        "Date": specific_date, 
                         "StartTime": start_time.strftime("%H:%M"),
                         "Duration": duration_mins,
                         "Priority": priority,
@@ -229,16 +234,14 @@ with st.sidebar:
                     save_entry("Tasks", new_entry)
                     st.success("Task Added!")
                 
-                # Reload logic
                 del st.session_state.data_loaded
                 st.rerun()
 
 # --- MAIN DASHBOARD ---
 st.title("🚀 My Daily Driver (Cloud)")
 
-# --- HEADS UP DISPLAY ---
 if not df.empty:
-    tmrw = datetime.today().date() + timedelta(days=1)
+    tmrw = get_bd_date() + timedelta(days=1)
     tmrw_high = df[(df['Date'] == tmrw) & (df['Priority'] == 'High')].sort_values(by="StartTime")
 else:
     tmrw_high = pd.DataFrame()
@@ -255,9 +258,9 @@ with col_alert1:
         st.success("No High Priority tasks tomorrow!")
 
 with col_alert2:
-    st.markdown("### 🚗 Travel Tracker (24h)")
+    st.markdown("### 🚗 Travel Tracker (Today)")
     if not df_travel.empty:
-        today_travel = df_travel[df_travel['Date'] == datetime.today().date()]
+        today_travel = df_travel[df_travel['Date'] == get_bd_date()]
         total_km = today_travel['DistanceKM'].sum()
     else:
         total_km = 0
@@ -266,11 +269,11 @@ with col_alert2:
 st.divider()
 
 # --- TABS ---
-tab_timeline, tab_log, tab_manage = st.tabs(["🕒 24-Hour Timeline", "🚗 Travel Log", "🗑️ Manage Tasks"])
+tab_timeline, tab_stats, tab_log, tab_manage = st.tabs(["🕒 24-Hour Timeline", "📊 Analytics", "🚗 Travel Log", "🗑️ Manage Tasks"])
 
 # 1. TIMELINE
 with tab_timeline:
-    selected_date = st.date_input("View Schedule For:", datetime.today())
+    selected_date = st.date_input("View Schedule For:", get_bd_date())
     
     if not df.empty:
         daily_tasks = df[df['Date'] == selected_date].sort_values(by="StartTime")
@@ -293,9 +296,6 @@ with tab_timeline:
             border_color = "red" if row['Priority'] == "High" else "#ddd"
             bg_color = "rgba(255, 0, 0, 0.05)" if row['Priority'] == "High" else "transparent"
             
-            # Simple status check
-            status_icon = "✅" if row['Status'] == 'Done' else "⬜"
-
             with st.container():
                 c1, c2, c3 = st.columns([1, 4, 1])
                 with c1:
@@ -304,8 +304,9 @@ with tab_timeline:
                 with c2:
                     st.markdown(f"""
                     <div style="border-left: 5px solid {border_color}; padding-left: 10px; background-color: {bg_color};">
-                        <h4 style="margin:0">{row['Task']}</h4>
-                        <p style="margin:0">📍 <b>{row['Location']}</b></p>
+                        <h4 style="margin:0">{row['Task']} <span style="font-size:0.8em; color:gray; font-weight:normal">({row['Category']})</span></h4>
+                        <p style="margin:0; font-size:0.95em">📍 <b>{row['Location']}</b></p>
+                        <p style="margin-top:4px; font-size:0.85em; font-style:italic; color:#555">📝 {row['Notes']}</p>
                     </div>
                     """, unsafe_allow_html=True)
                 
@@ -319,7 +320,17 @@ with tab_timeline:
                     else:
                         st.write("✅")
 
-# 2. TRAVEL LOG
+# 2. ANALYTICS (RESTORED!)
+with tab_stats:
+    st.subheader("Work Distribution")
+    if not df.empty:
+        # Pie Chart of Categories
+        fig = px.pie(df, names='Category', title='Tasks by Category')
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Add data to see stats.")
+
+# 3. TRAVEL LOG
 with tab_log:
     st.subheader("Log Your Travel")
     with st.form("travel_form", clear_on_submit=True):
@@ -330,7 +341,7 @@ with tab_log:
         
         if st.form_submit_button("Log Trip"):
             new_trip = {
-                "Date": datetime.today().date(),
+                "Date": get_bd_date(),
                 "From": t_from,
                 "To": t_to,
                 "DistanceKM": t_km,
@@ -341,32 +352,30 @@ with tab_log:
             st.rerun()
             
     if not df_travel.empty:
-        st.dataframe(df_travel[df_travel['Date'] == datetime.today().date()], hide_index=True)
+        st.dataframe(df_travel[df_travel['Date'] == get_bd_date()], hide_index=True)
 
-# 3. MANAGE (DELETE) - UPDATED
+# 4. MANAGE (DELETE)
 with tab_manage:
     st.subheader("Manage Tasks (Delete)")
     
-    # 1. Select Date to Filter
-    manage_date = st.date_input("Select Date to Edit:", datetime.today(), key="manage_date")
+    manage_date = st.date_input("Select Date to Edit:", get_bd_date(), key="manage_date")
     
     if not df.empty:
-        # Filter tasks for that date
         tasks_to_edit = df[df['Date'] == manage_date].sort_values(by="StartTime")
         
         if tasks_to_edit.empty:
             st.info("No tasks scheduled for this day.")
         else:
-            # Display as a clean list with Delete buttons
             for index, row in tasks_to_edit.iterrows():
                 col_det, col_del = st.columns([4, 1])
                 
                 with col_det:
                     st.markdown(f"**{row['StartTime']}** — {row['Task']}")
-                    st.caption(f"📍 {row['Location']} | {row['Category']}")
+                    st.caption(f"📍 {row['Location']} | 📂 {row['Category']}")
+                    if row['Notes']:
+                        st.caption(f"📝 {row['Notes']}")
                 
                 with col_del:
-                    # UNIQUE KEY is crucial here so buttons don't mix up
                     if st.button("🗑️ Delete", key=f"del_{index}"):
                         with st.spinner("Deleting from Cloud..."):
                             success = delete_task_from_sheet(row['Task'], row['Date'], row['StartTime'])
